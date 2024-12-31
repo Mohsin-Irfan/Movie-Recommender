@@ -1,6 +1,9 @@
 import streamlit as st
 import pickle
 import requests
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # Function to fetch movie poster
 def fetch_poster(movie_id):
@@ -24,10 +27,19 @@ def fetch_trailer(movie_id):
             return f"https://www.youtube.com/watch?v={video['key']}"
     return ""
 
-# Load data
+# Load movie data
 movies = pickle.load(open("movies_list.pkl", 'rb'))
-similarity = pickle.load(open("similarity.pkl", 'rb'))
 movies_list = movies['title'].values
+
+# Generate similarity matrix dynamically using TF-IDF vectorizer
+def generate_similarity_matrix():
+    # Ensure all 'tags' are strings (handle NaNs or other non-string values)
+    movies['tags'] = movies['tags'].fillna('').astype(str)
+    
+    tfidf = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = tfidf.fit_transform(movies['tags'])
+    similarity_matrix = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    return similarity_matrix
 
 # Page layout
 st.set_page_config(page_title="CineVerse", layout="wide")
@@ -81,20 +93,24 @@ st.markdown("<div class='header'>🎬 Movie Recommender System -- CineVerse 🍿
 st.markdown("<div class='subheader'>Select a movie to get recommendations:</div>", unsafe_allow_html=True)
 selectvalue = st.selectbox("Choose a movie", movies_list)
 
-# Recommendation function
-def recommend(movie):
+# Recommendation function using dynamic similarity matrix
+def recommend(movie, filtered_movies):
+    similarity_matrix = generate_similarity_matrix()  # Generate the similarity matrix on-the-fly
     index = movies[movies['title'] == movie].index[0]
     distances = sorted(
-        list(enumerate(similarity[index])),
+        list(enumerate(similarity_matrix[index])),
         reverse=True,
         key=lambda vector: vector[1]
     )
+    
     recommended_movies = []
     recommended_posters = []
-    for i in distances[1:6]:
+    for i in distances[1:6]:  # Top 5 recommendations
         movie_id = movies.iloc[i[0]]['id']
-        recommended_movies.append(movies.iloc[i[0]]['title'])
-        recommended_posters.append(fetch_poster(movie_id))
+        if movies.iloc[i[0]]['title'] in filtered_movies['title'].values:
+            recommended_movies.append(movies.iloc[i[0]]['title'])
+            recommended_posters.append(fetch_poster(movie_id))
+    
     return recommended_movies, recommended_posters
 
 # Carousel of trending movies
@@ -118,13 +134,11 @@ st.markdown("<div class='subheader'>Customize Your Recommendations:</div>", unsa
 genres = st.multiselect("Pick your favorite genres:", ["Action", "Comedy", "Drama", "Horror", "Romance", "Sci-Fi"])
 
 # Filter recommendations based on genres
-filtered_movies = movies[
-    movies['tags'].str.contains("|".join(genres), na=False)
-]
+filtered_movies = movies[movies['tags'].str.contains("|".join(genres), na=False)]
 
 # Show recommendations on button click
 if st.button("Show Recommendations"):
-    movie_names, movie_posters = recommend(selectvalue)
+    movie_names, movie_posters = recommend(selectvalue, filtered_movies)
 
     # Display recommendations with additional details
     st.markdown("<div class='subheader'>Recommended Movies 🎥</div>", unsafe_allow_html=True)
@@ -164,7 +178,7 @@ st.markdown(
     """
     <hr>
     <div class='footer'>
-        Built with ❤️ | © 2024 Movie Recommender
+        Created by Mohsin Irfan | © 2024 CineVerse
     </div>
     """,
     unsafe_allow_html=True
